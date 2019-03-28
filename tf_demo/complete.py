@@ -2,20 +2,16 @@ import tensorflow as tf
 import numpy as np
 import argparse
 import os
+import shutil
 import gym
-
-BINDINGS = {
-    'w': 1,
-    'a': 3,
-    's': 4,
-    'd': 2}
-SHARD_SIZE = 2000
+import getch
 
 
 def get_options():
     parser = argparse.ArgumentParser(description='Clone some expert data..')
     parser.add_argument('bc_data', type=str,
         help="The main datastore for this particular expert.")
+    parser.add_argument('model_dir', type=str, help="Folder for weights and tensorboard stuff")
 
     args = parser.parse_args()
     return args
@@ -34,7 +30,7 @@ def process_data(bc_data_dir):
         shard_path = os.path.join(bc_data_dir, shard)
         with open(shard_path, 'rb') as f:
             data = np.load(f)
-            shard_states, unprocessed_actions = zip(*data)
+            shard_states, unprocessed_actions, rewards, dones = zip(*data)
             shard_states = [x.flatten() for x in shard_states]
             
             # Add the shard to the dataset
@@ -50,7 +46,8 @@ def create_model():
     """
     Creates the model.
     """
-    state_ph = tf.placeholder(tf.float32, shape=[None, 2])
+    #state_ph = tf.placeholder(tf.float32, shape=[None, 2])
+    state_ph = tf.placeholder(tf.float32, shape=[None, 8])
     # Process the data
 
     # # Hidden neurons
@@ -61,7 +58,8 @@ def create_model():
         hidden = tf.layers.dense(hidden, 128, activation=tf.nn.relu)
     # Make output layers
     with tf.variable_scope("layer3"):
-        logits = tf.layers.dense(hidden, 2) 
+        #logits = tf.layers.dense(hidden, 2) 
+        logits = tf.layers.dense(hidden, 4) 
     # Take the action with the highest activation
     with tf.variable_scope("output"):
         action = tf.argmax(input=logits, axis=1)
@@ -76,7 +74,7 @@ def create_training(logits):
 
     # Convert it to a onehot. 1-> [1,0,0,0]
     with tf.variable_scope("loss"):
-        onehot_labels = tf.one_hot(indices=tf.cast(label_ph, tf.int32), depth=2) # 4 actions
+        onehot_labels = tf.one_hot(indices=tf.cast(label_ph, tf.int32), depth=4) # 4 actions
 
         loss = tf.losses.softmax_cross_entropy(
             onehot_labels=onehot_labels, logits=logits)
@@ -91,10 +89,22 @@ def create_training(logits):
     return train_op, loss, label_ph
 
 def run_main(opts):
+    if os.path.exists(opts.model_dir):
+        print('Path already exists. Remove? y for yes')
+        input_char = getch.getch()
+        if not input_char == 'y':
+            print('Exiting')
+            return
+        shutil.rmtree(opts.model_dir)
+    os.makedirs(opts.model_dir)
+    os.makedirs(os.path.join(opts.model_dir, 'logs'))
+    os.makedirs(os.path.join(opts.model_dir, 'weights'))
+
     # Create the environment with specified arguments
     state_data, action_data = process_data(opts.bc_data)
 
-    env = gym.make('MountainCar-v0')
+    #env = gym.make('MountainCar-v0')
+    env = gym.make('LunarLander-v2')
     env._max_episode_steps = 1200
 
     x, model, logits = create_model()
@@ -104,19 +114,15 @@ def run_main(opts):
 
     # Create summaries
     merged = tf.summary.merge_all()
-    train_writer = tf.summary.FileWriter('./logs',sess.graph)
+    train_writer = tf.summary.FileWriter(os.path.join(opts.model_dir, 'logs'), sess.graph)
 
     sess.run(tf.global_variables_initializer())
 
 
-    tick = 0
+    update = 0
     while True:
-        done = False
-        obs = env.reset()
-        while not done:
-
-            env.render()
-             # Get a random batch from the data
+        for _ in range (10):
+            # Get a random batch from the data
             batch_index = np.random.choice(len(state_data), 64) #Batch size
             state_batch, action_batch = state_data[batch_index], action_data[batch_index]
 
@@ -126,19 +132,25 @@ def run_main(opts):
                 labels: action_data
                 })
             print("Loss: {}".format(cur_loss))
-            train_writer.add_summary(cur_summaries, tick)
+            train_writer.add_summary(cur_summaries, update)
+            update += 1
 
+        done = False
+        obs = env.reset()
+        rewards = 0
+        while not done:
+            env.render()
 
             # Handle the toggling of different application states
             action = sess.run(model, feed_dict={
                 x: [obs.flatten()]
             })[0]*2 
 
-
             obs, reward, done, info = env.step(action)
+            rewards += reward
 
-
-            tick += 1
+        print("Num updates: {}".format(update))
+        print("Total reward: {}".format(rewards))
 
 
 if __name__ == "__main__":
