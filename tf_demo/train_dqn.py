@@ -36,7 +36,7 @@ def get_options():
 def train_dqn(opts,
               seed=None,
               lr=5e-4,
-              total_timesteps=100000,
+              total_timesteps=5000000,
               buffer_size=10000,
               exploration_fraction=0.1,
               exploration_final_eps=0.02,

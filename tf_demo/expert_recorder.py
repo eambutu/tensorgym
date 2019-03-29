@@ -106,7 +106,7 @@ def run_recorder(opts):
         if not os.path.exists(ddir):
             os.makedirs(ddir)
         with open(os.path.join(ddir, shard_name), 'wb') as f:
-            np.save(f, sarsa_pairs)
+            np.save(f, shard)
 
 if __name__ == "__main__":
     opts = get_options()
