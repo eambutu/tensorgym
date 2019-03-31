@@ -6,12 +6,14 @@ import shutil
 import gym
 import getch
 
+from baselines.common.tf_util import load_variables, save_variables
 
 def get_options():
     parser = argparse.ArgumentParser(description='Clone some expert data..')
     parser.add_argument('bc_data', type=str,
         help="The main datastore for this particular expert.")
     parser.add_argument('model_dir', type=str, help="Folder for weights and tensorboard stuff")
+    parser.add_argument('model_weights', type=str, help="File name for model weights")
 
     args = parser.parse_args()
     return args
@@ -120,8 +122,9 @@ def run_main(opts):
 
 
     update = 0
+    save_freq = 1000
     while True:
-        for _ in range (10):
+        for _ in range (25):
             # Get a random batch from the data
             batch_index = np.random.choice(len(state_data), 64) #Batch size
             state_batch, action_batch = state_data[batch_index], action_data[batch_index]
@@ -134,6 +137,9 @@ def run_main(opts):
             print("Loss: {}".format(cur_loss))
             train_writer.add_summary(cur_summaries, update)
             update += 1
+
+        if update % save_freq == 0:
+            save_variables(opts.model_weights)
 
         done = False
         obs = env.reset()

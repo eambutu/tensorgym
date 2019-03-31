@@ -81,7 +81,7 @@ def run_recorder(opts):
     num_episodes = 0
     num_shards = 0
 
-    for _ in range(100000):
+    for _ in range(20000):
         done = False
         obs = _last_obs = env.reset()
         rewards = 0
