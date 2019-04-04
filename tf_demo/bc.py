@@ -6,7 +6,35 @@ import shutil
 import gym
 import getch
 
-from baselines.common.tf_util import load_variables, save_variables
+from baselines.common.tf_util import load_variables, save_variables, initialize
+
+def log_histogram(values, step, bins=1000):
+    """Logs the histogram of a list/vector of values."""
+    # Convert to a numpy array
+    values = np.array(values)
+    
+    # Create histogram using numpy        
+    counts, bin_edges = np.histogram(values, bins=bins)
+
+    # Fill fields of histogram proto
+    hist = tf.HistogramProto()
+    hist.min = float(np.min(values))
+    hist.max = float(np.max(values))
+    hist.num = int(np.prod(values.shape))
+    hist.sum = float(np.sum(values))
+    hist.sum_squares = float(np.sum(values**2))
+
+    # Requires equal number as bins, where the first goes from -DBL_MAX to bin_edges[1]
+    # See https://github.com/tensorflow/tensorflow/blob/master/tensorflow/core/framework/summary.proto#L30
+    # Thus, we drop the start of the first bin
+    bin_edges = bin_edges[1:]
+
+    # Add bin edges and counts
+    for edge in bin_edges:
+        hist.bucket_limit.append(edge)
+    for c in counts:
+        hist.bucket.append(c)
+    return hist
 
 def get_options():
     parser = argparse.ArgumentParser(description='Clone some expert data..')
@@ -40,7 +68,7 @@ def process_data(bc_data_dir):
             actions.extend(unprocessed_actions)
 
     states = np.asarray(states, dtype=np.float32)
-    actions = np.asarray(actions, dtype=np.float32)/2
+    actions = np.asarray(actions, dtype=np.float32)
     print("Processed with {} pairs".format(len(states)))
     return states, actions
 
@@ -54,10 +82,11 @@ def create_model():
 
     # # Hidden neurons
     with tf.variable_scope("layer1"):
-        hidden = tf.layers.dense(state_ph, 128, activation=tf.nn.relu)
+        hidden = tf.layers.dense(state_ph, 64, activation=tf.nn.relu)
 
     with tf.variable_scope("layer2"):
-        hidden = tf.layers.dense(hidden, 128, activation=tf.nn.relu)
+        hidden = tf.layers.dense(hidden, 64, activation=tf.nn.relu)
+
     # Make output layers
     with tf.variable_scope("layer3"):
         #logits = tf.layers.dense(hidden, 2) 
@@ -112,14 +141,16 @@ def run_main(opts):
     x, model, logits = create_model()
     train, loss, labels = create_training(logits)
 
-    sess = tf.Session()
+    config = tf.ConfigProto()
+    config.gpu_options.allow_growth=True
+    sess = tf.Session(config=config)
 
     # Create summaries
     merged = tf.summary.merge_all()
     train_writer = tf.summary.FileWriter(os.path.join(opts.model_dir, 'logs'), sess.graph)
 
+    print(tf.global_variables())
     sess.run(tf.global_variables_initializer())
-
 
     update = 0
     save_freq = 1000
@@ -139,24 +170,33 @@ def run_main(opts):
             update += 1
 
         if update % save_freq == 0:
-            save_variables(opts.model_weights)
+            save_variables(os.path.join(opts.model_dir, 'weights', opts.model_weights), sess=sess)
 
         done = False
         obs = env.reset()
         rewards = 0
+        action_freq = [0 for _ in range(4)]
         while not done:
             env.render()
 
             # Handle the toggling of different application states
             action = sess.run(model, feed_dict={
                 x: [obs.flatten()]
-            })[0]*2 
+            })[0]
 
+            action_freq[action] += 1
+            
             obs, reward, done, info = env.step(action)
             rewards += reward
 
+        reward_summary = tf.Summary(value=[tf.Summary.Value(tag='reward', simple_value=rewards)])
+        act_summary = tf.Summary(value=[tf.Summary.Value(tag='act_distribution', histo=log_histogram(action_freq, 1, bins=4))])
+        train_writer.add_summary(reward_summary, update // 25)
+        train_writer.add_summary(act_summary, update // 25)
+
         print("Num updates: {}".format(update))
         print("Total reward: {}".format(rewards))
+        print("Action dict: {}".format(action_freq))
 
 
 if __name__ == "__main__":

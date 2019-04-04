@@ -7,6 +7,8 @@ import gym
 import numpy as np
 import time
 import os
+import getch
+import shutil
 
 import tensorflow as tf
 
@@ -26,7 +28,7 @@ SHARD_SIZE = 2000
 
 def get_options():
     parser = argparse.ArgumentParser(description='Trains DQN..')
-    parser.add_argument('model_weights', type=str, help='Path to weights to load')
+    parser.add_argument('model_dir', type=str, help='Path to weights to load')
 
     args = parser.parse_args()
 
@@ -36,26 +38,39 @@ def get_options():
 def train_dqn(opts,
               seed=None,
               lr=5e-4,
-              total_timesteps=5000000,
-              buffer_size=10000,
-              exploration_fraction=0.1,
+              total_timesteps=10000000,
+              buffer_size=50000,
+              exploration_fraction=0.5,
               exploration_final_eps=0.02,
               train_freq=4,
               batch_size=64,
-              checkpoint_freq=10000,
+              checkpoint_freq=500000,
               learning_starts=1000,
               gamma=0.995,
-              target_network_update_freq=500,
+              target_network_update_freq=1000,
               load_path=None):
     """
     Runs the main recorder by binding certain discrete actions to keys.
     """
+    if os.path.exists(opts.model_dir):
+        print('Path already exists. Remove? y for yes')
+        input_char = getch.getch()
+        if not input_char == 'y':
+            print('Exiting')
+            return
+        shutil.rmtree(opts.model_dir)
+    os.makedirs(opts.model_dir)
+    os.makedirs(os.path.join(opts.model_dir, 'logs'))
+    os.makedirs(os.path.join(opts.model_dir, 'weights'))
+
     #env = gym.make('MountainCar-v0')
     env = gym.make('LunarLander-v2')
     env._max_episode_steps = 1200
 
     sess = get_session()
     set_global_seeds(seed)
+
+    train_writer = tf.summary.FileWriter(os.path.join(opts.model_dir, 'logs'), sess.graph)
 
     q_func = build_q_func('mlp')
 
@@ -101,7 +116,7 @@ def train_dqn(opts,
         episode_rewards[-1] += rew
         if done:
             print("Exploration value: {}".format(exploration.value(t)))
-            print(episode_rewards)
+            print("Last 25 episode rewards: {}".format(episode_rewards[-25:]))
             obs = env.reset()
             episode_rewards.append(0.0)
 
@@ -109,14 +124,16 @@ def train_dqn(opts,
             # Minimize the error in Bellman's equation on a batch sampled from replay buffer.
             obses_t, actions, rewards, obses_tp1, dones = replay_buffer.sample(batch_size)
             weights, batch_idxes = np.ones_like(rewards), None
-            td_errors = train(obses_t, actions, rewards, obses_tp1, dones, weights)
+            td_errors, summary = train(obses_t, actions, rewards, obses_tp1, dones, weights)
+            train_writer.add_summary(summary, t)
             
         if t > learning_starts and t % target_network_update_freq == 0:
             # Update target network periodically.
             update_target()
 
         if t > learning_starts and t % checkpoint_freq == 0:
-            save_variables(opts.model_weights)
+            save_variables(os.path.join(opts.model_dir, 'weights', '{}.model'.format(t)))
+    save_variables(os.path.join(opts.model_dir, 'weights', 'last.model'))
 
 if __name__ == "__main__":
     opts = get_options()
