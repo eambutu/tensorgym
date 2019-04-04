@@ -117,6 +117,10 @@ def train_dqn(opts,
         if done:
             print("Exploration value: {}".format(exploration.value(t)))
             print("Last 25 episode rewards: {}".format(episode_rewards[-25:]))
+
+            reward_summary = tf.Summary(value=[tf.Summary.Value(tag='reward', simple_value=episode_rewards[-1])])
+            train_writer.add_summary(reward_summary, t)
+
             obs = env.reset()
             episode_rewards.append(0.0)
 
