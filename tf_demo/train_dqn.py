@@ -37,17 +37,17 @@ def get_options():
 
 def train_dqn(opts,
               seed=None,
-              lr=5e-4,
-              total_timesteps=10000000,
+              lr=1e-3,
+              total_timesteps=500000,
               buffer_size=50000,
-              exploration_fraction=0.5,
+              exploration_fraction=0.1,
               exploration_final_eps=0.02,
-              train_freq=4,
-              batch_size=64,
+              train_freq=1,
+              batch_size=32,
               checkpoint_freq=500000,
               learning_starts=1000,
-              gamma=0.995,
-              target_network_update_freq=1000,
+              gamma=1.000,
+              target_network_update_freq=3000,
               load_path=None):
     """
     Runs the main recorder by binding certain discrete actions to keys.
